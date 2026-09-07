@@ -1,0 +1,85 @@
+name: game-store-core
+
+x-app: &app
+  build:
+    context: .
+  restart: unless-stopped
+  environment: &app-environment
+    APP_ENV: ${APP_ENV:-dev}
+    APP_DEBUG: ${APP_DEBUG:-1}
+    DATABASE_DSN: ${DATABASE_DSN:-pgsql:host=db;port=5432;dbname=game_store}
+    DATABASE_USER: ${DATABASE_USER:-game_store}
+    DATABASE_PASSWORD: ${DATABASE_PASSWORD:-game_store}
+    PROVIDER_A_URL: ${PROVIDER_A_URL:-http://api:8080/stubs/providers/a/issue}
+    PROVIDER_B_URL: ${PROVIDER_B_URL:-http://api:8080/stubs/providers/b/issue}
+    PROVIDER_CONNECT_TIMEOUT_MS: ${PROVIDER_CONNECT_TIMEOUT_MS:-300}
+    PROVIDER_TIMEOUT_MS: ${PROVIDER_TIMEOUT_MS:-800}
+    QUEUE_POLL_MS: ${QUEUE_POLL_MS:-200}
+    QUEUE_BASE_RETRY_MS: ${QUEUE_BASE_RETRY_MS:-500}
+    QUEUE_STALE_AFTER_SECONDS: ${QUEUE_STALE_AFTER_SECONDS:-60}
+    RECOVERY_INTERVAL_SECONDS: ${RECOVERY_INTERVAL_SECONDS:-15}
+    RECOVERY_AFTER_SECONDS: ${RECOVERY_AFTER_SECONDS:-30}
+    RECOVERY_BATCH_SIZE: ${RECOVERY_BATCH_SIZE:-20}
+  volumes:
+    - .:/app
+    - vendor:/app/vendor
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-game_store}
+      POSTGRES_USER: ${POSTGRES_USER:-game_store}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-game_store}
+    ports:
+      - "${POSTGRES_PORT:-54329}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["php", "bin/migrate.php"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      <<: *app-environment
+      PHP_CLI_SERVER_WORKERS: 4
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  worker:
+    <<: *app
+    command: ["php", "bin/worker.php"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  recovery:
+    <<: *app
+    command: ["php", "bin/recovery-worker.php"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  vendor:

@@ -1,0 +1,226 @@
+openapi: 3.1.0
+info:
+  title: Game Store Core API
+  version: 1.0.0
+  description: Reliable order and digital-code delivery backend.
+servers:
+  - url: http://localhost:8080
+paths:
+  /health:
+    get:
+      operationId: health
+      responses:
+        '200':
+          description: Service is ready.
+  /api/v1/catalog:
+    get:
+      operationId: listProducts
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - in: query
+          name: after_id
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: Active products ordered by id.
+  /api/v1/orders:
+    post:
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sku]
+              additionalProperties: false
+              properties:
+                sku:
+                  type: string
+                  example: STEAM-TOPUP-500
+                order_id:
+                  type: string
+                  pattern: '^ord_[A-Za-z0-9_-]{3,70}$'
+                  description: Optional caller-supplied id for idempotency and early-webhook tests.
+      responses:
+        '201':
+          description: Order created.
+        '200':
+          description: Idempotent replay of the same order_id and SKU.
+        '409':
+          description: order_id is already used for another SKU.
+  /api/v1/orders/{id}:
+    get:
+      operationId: getOrder
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Order state; delivered orders include the digital code.
+        '404':
+          description: Order not found.
+  /api/v1/webhooks/payment:
+    post:
+      operationId: paymentWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentWebhook'
+      responses:
+        '200':
+          description: Event accepted, including duplicates or events awaiting an order.
+  /stubs/providers/{provider}/issue:
+    post:
+      operationId: issueProviderCode
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+            enum: [A, B]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderIssueRequest'
+      responses:
+        '200':
+          description: Code issued or replayed for the same request_id.
+        '409':
+          description: Out of stock or idempotency conflict.
+        '503':
+          description: Definitive failure before issue in the test stub.
+  /api/v1/dev/providers/{provider}:
+    get:
+      operationId: getProviderStubSettings
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+      responses:
+        '200':
+          description: Current deterministic/random stub settings.
+    put:
+      operationId: configureProviderStub
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode:
+                  type: string
+                  enum: [random, success, fail_before_issue, timeout_after_issue, out_of_stock]
+                failure_rate:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                timeout_rate:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                timeout_ms:
+                  type: integer
+                  minimum: 1
+                  maximum: 60000
+      responses:
+        '200':
+          description: Stub settings updated.
+  /api/v1/ops/reconciliation:
+    get:
+      operationId: reconciliationReport
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        '200':
+          description: Cross-check of payments, orders and pending webhooks.
+  /api/v1/ops/recovery:
+    post:
+      operationId: recoverOrders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order_id:
+                  type: string
+                  pattern: '^ord_[A-Za-z0-9_-]{3,70}$'
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                older_than_seconds:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: Recoverable orders returned to the queue.
+components:
+  parameters:
+    Provider:
+      in: path
+      name: provider
+      required: true
+      schema:
+        type: string
+        enum: [A, B]
+  schemas:
+    PaymentWebhook:
+      type: object
+      additionalProperties: true
+      required: [event_id, order_id, status, amount, currency, created_at]
+      properties:
+        event_id:
+          type: string
+        order_id:
+          type: string
+        status:
+          type: string
+          enum: [paid, failed]
+        amount:
+          oneOf:
+            - type: number
+            - type: string
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        created_at:
+          type: string
+          format: date-time
+    ProviderIssueRequest:
+      type: object
+      required: [request_id, sku, order_id]
+      additionalProperties: false
+      properties:
+        request_id:
+          type: string
+        sku:
+          type: string
+        order_id:
+          type: string
