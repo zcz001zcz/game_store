@@ -1,38 +1,49 @@
 # Матрица приёмки
 
-| Критерий задания | Реализация | Воспроизведение |
+## Второй этап
+
+| Требование | Реализация | Автоматическая проверка |
 | --- | --- | --- |
-| Каталог под параллельным чтением | keyset pagination, покрывающий и частичные индексы | Docker-runner: 2000 временных SKU, 50 одновременных чтений страницы по 100 товаров |
-| 50 параллельных `paid` → одна выдача | блокировка заказа, уникальные capture/job/fulfillment | Docker-runner: race, разные `event_id` |
-| Повтор того же `event_id` ничего не меняет | PK `payment_events.event_id`, `ON CONFLICT DO NOTHING` | Docker-runner: race, один `event_id` |
-| Вебхук раньше заказа или не по порядку | pending events + advisory lock агрегата + replay при создании | Docker-runner: ordering |
-| Таймаут после фактической выдачи | `uncertain`, прежний provider и стабильный `request_id` | Docker-runner: timeout |
-| A недоступен → B | fallback только после определённого отказа до выдачи | Docker-runner: fallback |
-| Пустой остаток | `out_of_stock`, reset определённых попыток и безопасный requeue | Docker-runner: stock recovery |
-| Зависший оплаченный заказ | периодический recovery, reset только определённых отказов, тот же dedup key | Docker-runner: `delivery_failed → delivered` без ручного endpoint |
-| Сверка состояния | четыре выборки: невыданная оплата, выдача без оплаты, ledger mismatch, pending event | Docker-runner создаёт, обнаруживает и удаляет четыре контролируемые аномалии |
+| Несколько товаров и разные поставщики | order_items со snapshot provider/цены | stage2: partial basket A+B |
+| Частичная выдача | независимый commit позиции + refund невыданной | delivered + refunded в одном заказе |
+| Оплачено = выдано + возвращено | capture/refund ledger и money projection | 30000 = 10000 + 20000 |
+| Без лишних повторов | PK/UNIQUE + idempotency keys | повтор webhook и recovery |
+| Авария и restart | lease очереди + стабильный request_id | worker exit 70, restart, одна выдача |
+| Дубль кода поставщика | audit, карантин, UNIQUE fulfillment code | duplicate_code_once |
+| Чужой код | requested_sku против actual_sku | foreign_code_once |
+| Ошибка после выдачи | audit на неуспешном ответе | error_after_issue_once, один issue |
+| Авторазбор расхождений | repair generation, resolved discrepancy | обе аномалии закрыты автоматически |
+| Очередь при лимите | PostgreSQL sliding-window limiter | 9 заказов при 3/2s |
+| Лимит не превышен | advisory lock + request log | проверка каждого скользящего окна |
+| Оплаченные первыми | unpaid не допускается в delivery queue | у unpaid нет job и provider issue |
+| Видимый прогресс | GET /ops/queue-progress | проверка полей до/после burst |
+| Состояние на дату | immutable snapshots | состояние created до оплаты |
+| Нельзя переписать историю | trigger UPDATE/DELETE reject | прямой UPDATE обязан упасть |
+| Итоги периода сходятся | суммы event deltas | capture = delivery + refund |
 
-Дополнительные пункты:
+Команда:
 
-- сверка: `GET /api/v1/ops/reconciliation`, автоматически проверяется по всем четырём секциям;
-- ручное восстановление: `POST /api/v1/ops/recovery`;
-- фоновое восстановление: сервис `recovery` в Compose, проверяется без вызова ручного endpoint;
-- журнал денег: `ledger_entries`, одна capture-проводка на заказ;
-- структурированные JSON-логи: API, worker и поставщики;
-- горячий каталог: keyset pagination и частичные/покрывающие индексы.
+~~~console
+docker compose exec -T api php tests/Integration/stage2.php
+~~~
 
-Кроссплатформенная команда полной приёмки:
+## Регрессия первого этапа
 
-```bash
+Сохраняются все восемь сценариев: каталог 2000 SKU под 50 конкурентными
+чтениями, 100 webhook, fallback, uncertain timeout, out-of-stock recovery,
+background recovery, ранние/переставленные webhook и четыре класса
+reconciliation.
+
+~~~console
 docker compose exec -T api php tests/Integration/run.php
-```
+~~~
 
-## Подтверждённый прогон
+Обе части одной командой:
 
-Последняя полная проверка выполнена 2026-09-07 на PHP 8.3.33 и PostgreSQL 16:
+~~~console
+docker compose exec -T api php tests/Integration/run-all.php
+~~~
 
-- PHPUnit 11.5.56: **16 тестов, 25 проверок, ошибок нет**;
-- интеграционный runner: **8 сценариев из 8, ошибок нет**, 20.56 секунды;
-- нагрузочная фикстура: 2000 SKU, 50 параллельных чтений по 100 товаров;
-- фоновое восстановление: `delivery_failed → delivered` за 13.08 секунды;
-- контролируемые аномалии сверки обнаружены во всех четырёх секциях и удалены.
+До пользовательского Docker-прогона выполнена статическая проверка синтаксиса
+всех PHP-файлов и разбор OpenAPI YAML. Фактический runtime-результат следует
+фиксировать из вывода этих команд.

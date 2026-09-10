@@ -11,7 +11,7 @@ $runner = new MigrationRunner(ConnectionFactory::create(), dirname(__DIR__) . '/
 $applied = $runner->run();
 
 if ($applied === []) {
-	fwrite(STDOUT, "Database is up to date.\n");
+    fwrite(STDOUT, "Database is up to date.\n");
     exit(0);
 }
 

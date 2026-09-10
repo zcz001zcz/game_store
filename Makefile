@@ -1,4 +1,4 @@
-.PHONY: up down logs migrate test test-race test-fallback test-timeout test-stock test-ordering test-integration test-integration-shell worker-once
+.PHONY: up down logs migrate test test-race test-fallback test-timeout test-stock test-ordering test-integration test-stage2 test-all test-integration-shell worker-once
 
 up:
 	docker compose up --build -d
@@ -32,6 +32,12 @@ test-ordering:
 
 test-integration:
 	docker compose exec -T api php tests/Integration/run.php
+
+test-stage2:
+	docker compose exec -T api php tests/Integration/stage2.php
+
+test-all:
+	docker compose exec -T api php tests/Integration/run-all.php
 
 test-integration-shell: test-race test-fallback test-timeout test-stock test-ordering
 

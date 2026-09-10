@@ -6,6 +6,6 @@ namespace GameStore\Domain\Provider;
 
 use RuntimeException;
 
-final class RetryableDeliveryException extends RuntimeException
+class RetryableDeliveryException extends RuntimeException
 {
 }

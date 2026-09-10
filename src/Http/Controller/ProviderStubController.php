@@ -12,39 +12,50 @@ use GameStore\Support\Env;
 
 final class ProviderStubController
 {
-	public function __construct(private readonly ProviderStubService $providers)
-	{
-	}
+    public function __construct(private readonly ProviderStubService $providers)
+    {
+    }
 
-	/** @param array<string, string> $params */
-	public function issue(Request $request, array $params): Response
-	{
-		$result = $this->providers->issue($params['provider'] ?? '', $request->json());
+    /** @param array<string, string> $params */
+    public function issue(Request $request, array $params): Response
+    {
+        $result = $this->providers->issue($params['provider'] ?? '', $request->json());
 
-		return Response::json($result['body'], $result['status']);
-	}
+        return Response::json($result['body'], $result['status']);
+    }
 
-	/** @param array<string, string> $params */
-	public function configure(Request $request, array $params): Response
-	{
-		$this->assertDevelopmentEnvironment();
-		$settings = $this->providers->configure($params['provider'] ?? '', $request->json());
+    /** @param array<string, string> $params */
+    public function audit(Request $request, array $params): Response
+    {
+        $result = $this->providers->audit(
+            $params['provider'] ?? '',
+            $params['request_id'] ?? '',
+        );
 
-		return Response::json(['data' => $settings]);
-	}
+        return Response::json($result);
+    }
 
-	/** @param array<string, string> $params */
-	public function getSettings(Request $request, array $params): Response
-	{
-		$this->assertDevelopmentEnvironment();
+    /** @param array<string, string> $params */
+    public function configure(Request $request, array $params): Response
+    {
+        $this->assertDevelopmentEnvironment();
+        $settings = $this->providers->configure($params['provider'] ?? '', $request->json());
 
-		return Response::json(['data' => $this->providers->getSettings($params['provider'] ?? '')]);
-	}
+        return Response::json(['data' => $settings]);
+    }
 
-	private function assertDevelopmentEnvironment(): void
-	{
-		if (in_array(strtolower(Env::string('APP_ENV', 'dev')), ['prod', 'production'], true)) {
-			throw new HttpException(404, 'Resource not found', 'not_found');
-		}
-	}
+    /** @param array<string, string> $params */
+    public function getSettings(Request $request, array $params): Response
+    {
+        $this->assertDevelopmentEnvironment();
+
+        return Response::json(['data' => $this->providers->getSettings($params['provider'] ?? '')]);
+    }
+
+    private function assertDevelopmentEnvironment(): void
+    {
+        if (in_array(strtolower(Env::string('APP_ENV', 'dev')), ['prod', 'production'], true)) {
+            throw new HttpException(404, 'Resource not found', 'not_found');
+        }
+    }
 }
